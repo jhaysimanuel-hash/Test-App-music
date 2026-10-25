@@ -68,10 +68,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme }) => {
       }
     } catch (err: any) {
       const code = typeof err?.code === 'string' ? err.code : '';
-      const message = code === 'auth/popup-blocked'
-        ? 'Your browser blocked the Google sign-in window. Allow pop-ups and try again.'
-        : code === 'auth/unauthorized-domain'
-          ? 'This app address is not enabled for Google sign-in in Firebase.'
+      const message = code === 'auth/unauthorized-domain'
+        ? 'This app address is not enabled for Google sign-in in Firebase.'
+        : code === 'auth/operation-not-allowed'
+          ? 'Google sign-in is not enabled in Firebase for this app.'
           : err?.message || 'Failed to sign in with Google';
       setError(message);
     } finally {

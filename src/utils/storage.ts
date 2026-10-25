@@ -383,8 +383,12 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
 }
 
 export function getCurrentUser(): UserProfile {
-  // Keeping this for legacy support or local fallback, but should use getCurrentUserProfile
   return getStored<UserProfile>(STORAGE_KEYS.CURRENT_USER, DEFAULT_TEAM_MEMBERS[1]);
+}
+
+export function getCachedUserProfile(userId: string): UserProfile | null {
+  const cached = getStored<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
+  return cached?.id === userId ? cached : null;
 }
 
 export function setCurrentUser(user: UserProfile): void {

@@ -32,6 +32,7 @@ import {
   updateWorkspaceBannerAndName,
   updateUserProfile,
   getCurrentUserProfile,
+  getCachedUserProfile,
   saveGalleryImage,
   checkAndElevateAdmin,
   subscribeToSongs,
@@ -113,7 +114,15 @@ export default function App() {
     const loadingSafetyTimeout = setTimeout(() => {
       setAuthLoading(false);
       if (authStateReceived && auth.currentUser) {
-        setConnectionError('Firebase connected to your account, but the Firestore profile request did not finish. Check your connection and try again.');
+        const cachedProfile = getCachedUserProfile(auth.currentUser.uid);
+        if (cachedProfile?.workspaceId) {
+          setCurrentUserState(cachedProfile);
+          setActiveWorkspaceIdState(cachedProfile.workspaceId);
+          setActiveWorkspaceId(cachedProfile.workspaceId);
+          setIsAuthenticated(true);
+        } else {
+          setConnectionError('Firebase is offline and no saved account is available on this device. Reconnect and try again.');
+        }
       }
     }, 5000);
 
@@ -127,9 +136,12 @@ export default function App() {
           if (user.email === 'jhaysimanuel@gmail.com') {
             await checkAndElevateAdmin(user.uid).catch(err => console.warn(err));
           }
-          const profile = await getCurrentUserProfile().catch(() => null);
+          const profile = !navigator.onLine
+            ? getCachedUserProfile(user.uid)
+            : (await getCurrentUserProfile().catch(() => null)) || getCachedUserProfile(user.uid);
           
           setCurrentUserState(profile);
+          if (profile) setCurrentUser(profile);
           setIsAuthenticated(!!profile);
           setConnectionError(null);
           
@@ -294,7 +306,7 @@ export default function App() {
     setActiveWorkspaceIdState(wsId);
     setActiveWorkspaceId(wsId);
     setCurrentUserState(user);
-    // setCurrentUser(user); // Legacy
+    setCurrentUser(user);
     setIsAuthenticated(true);
     showToast(`Entered ${activeWorkspace.churchName} as ${user.role.toUpperCase()}`);
   };
@@ -641,6 +653,12 @@ export default function App() {
         <div className="fixed bottom-6 right-6 z-50 bg-red-500 text-white font-bold px-4 py-2.5 rounded-xl shadow-2xl text-xs flex items-center gap-2 animate-in fade-in">
           <span className="w-2 h-2 rounded-full bg-white" />
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {!isOnline && currentUser && (
+        <div className="fixed top-20 left-1/2 z-40 -translate-x-1/2 rounded-full border border-amber-500/40 bg-amber-500/15 px-4 py-2 text-center text-xs font-bold text-amber-300 shadow-lg backdrop-blur">
+          Offline mode: your saved account is open. Changes will sync when connection returns.
         </div>
       )}
 

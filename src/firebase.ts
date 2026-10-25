@@ -2,7 +2,8 @@ import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   GoogleAuthProvider, 
-  signInWithPopup, 
+  signInWithPopup,
+  signInWithRedirect,
   setPersistence, 
   browserLocalPersistence 
 } from 'firebase/auth';
@@ -25,7 +26,11 @@ export async function signInWithGoogle() {
     await persistenceReady;
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'auth/popup-blocked') {
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    }
     console.error("Error signing in with Google:", error);
     throw error;
   }
