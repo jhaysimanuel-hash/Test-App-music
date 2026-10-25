@@ -1,6 +1,5 @@
 import { LiveSessionState } from '../types';
-import { db } from '../firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { supabase } from '../firebase';
 
 const STORAGE_KEY_LIVE_SESSION = 'worshipflow_live_session_state';
 const DEFAULT_ROOM_ID = 'main-sanctuary';
@@ -9,7 +8,7 @@ export const INITIAL_LIVE_STATE: LiveSessionState = {
   roomId: DEFAULT_ROOM_ID,
   activeEventId: 'setlist-sunday-service',
   activeSongId: 'song-goodness-of-god',
-  activeSectionId: 'section-2', // Verse 1
+  activeSectionId: 'section-2',
   activeSectionLabel: 'Verse 1',
   activeSongTitle: 'Goodness of God',
   activeArtist: 'Bethel Music / Jenn Johnson',
@@ -28,13 +27,12 @@ class SyncEngine {
   private currentState: LiveSessionState;
   private isOnlineStatus: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private currentWorkspaceId: string | null = null;
-  private unsubscribeFirestore: (() => void) | null = null;
+  private channel: ReturnType<typeof supabase.channel> | null = null;
 
   constructor() {
     this.currentState = this.loadInitialState();
 
     if (typeof window !== 'undefined') {
-      // Network listener
       window.addEventListener('online', () => {
         this.isOnlineStatus = true;
         this.notifyListeners();
@@ -47,22 +45,36 @@ class SyncEngine {
   }
 
   public initWorkspace(wsId: string) {
-    console.log("Initializing sync engine for workspace:", wsId);
     if (this.currentWorkspaceId === wsId) return;
     this.currentWorkspaceId = wsId;
 
-    if (this.unsubscribeFirestore) {
-      this.unsubscribeFirestore();
+    if (this.channel) {
+      supabase.removeChannel(this.channel);
+      this.channel = null;
     }
 
-    const docRef = doc(db, 'workspaces', wsId, 'live', 'current');
-    this.unsubscribeFirestore = onSnapshot(docRef, (snapshot: any) => {
-      console.log("Received live state update for workspace:", wsId);
-      if (snapshot.exists()) {
-        const data = snapshot.data() as LiveSessionState;
-        this.handleIncomingState(data);
+    // Load current live state.
+    this.fetchState(wsId);
+
+    this.channel = supabase.channel(`live-${wsId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions', filter: `workspace_id=eq.${wsId}` }, (payload: any) => {
+        const data = payload.new;
+        if (data && data.state) {
+          this.handleIncomingState(data.state as LiveSessionState);
+        }
+      })
+      .subscribe();
+  }
+
+  private async fetchState(wsId: string) {
+    try {
+      const { data, error } = await supabase.from('live_sessions').select('state').eq('workspace_id', wsId).maybeSingle();
+      if (!error && data?.state) {
+        this.handleIncomingState(data.state as LiveSessionState);
       }
-    });
+    } catch (err) {
+      console.warn('fetchState error:', err);
+    }
   }
 
   private loadInitialState(): LiveSessionState {
@@ -83,14 +95,11 @@ class SyncEngine {
       return;
     }
     this.currentState = newState;
-    
-    // Cache to localStorage
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(STORAGE_KEY_LIVE_SESSION, JSON.stringify(newState));
       } catch (e) {}
     }
-
     this.notifyListeners();
   }
 
@@ -102,9 +111,6 @@ class SyncEngine {
     return this.isOnlineStatus;
   }
 
-  /**
-   * Broadcast state changes to all listening gadgets & windows via Firestore
-   */
   public async broadcastUpdate(partial: Partial<LiveSessionState>, authorName: string = 'Worship Leader') {
     const nextState: LiveSessionState = {
       ...this.currentState,
@@ -112,20 +118,21 @@ class SyncEngine {
       updatedBy: authorName,
       updatedAt: Date.now()
     };
-
-    console.log("Broadcasting live state update:", partial);
     this.currentState = nextState;
 
     if (this.currentWorkspaceId) {
       try {
-        const docRef = doc(db, 'workspaces', this.currentWorkspaceId, 'live', 'current');
-        await setDoc(docRef, nextState);
+        await supabase.from('live_sessions').upsert({
+          workspace_id: this.currentWorkspaceId,
+          state: nextState,
+          updated_by: authorName,
+          updated_at: nextState.updatedAt,
+        });
       } catch (err) {
         console.error('Failed to sync live state to cloud', err);
       }
     }
 
-    // Local notification
     this.notifyListeners();
   }
 

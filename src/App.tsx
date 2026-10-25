@@ -34,16 +34,14 @@ import {
   getCurrentUserProfile,
   getCachedUserProfile,
   saveGalleryImage,
-  checkAndElevateAdmin,
   subscribeToSongs,
   subscribeToSetlists,
   subscribeToProjectorSettings,
   subscribeToUserProfile,
+  subscribeToWorkspaceMetadata,
   DEFAULT_USER_PREFERENCES
 } from './utils/storage';
-import { auth, db } from './firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { supabase } from './firebase';
 import { PALETTES, INSTALLED_FONTS } from './utils/themeHelper';
 import { syncEngine } from './utils/syncEngine';
 import { parseSongLyrics } from './utils/songParser';
@@ -104,61 +102,40 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // Firebase Auth Listener with real-time subscriptions & safety timeout
+  // Supabase Auth Listener with real-time subscriptions & safety timeout
   useEffect(() => {
     let unsubscribeWs: (() => void) | null = null;
     let unsubscribeUserProf: (() => void) | null = null;
     let authStateReceived = false;
 
-    // Auth can resolve before Firestore profile loading finishes. Keep the login screen usable while cloud data loads.
     const loadingSafetyTimeout = setTimeout(() => {
       setAuthLoading(false);
-      if (authStateReceived && auth.currentUser) {
-        const cachedProfile = getCachedUserProfile(auth.currentUser.uid);
-        if (cachedProfile?.workspaceId) {
-          setCurrentUserState(cachedProfile);
-          setActiveWorkspaceIdState(cachedProfile.workspaceId);
-          setActiveWorkspaceId(cachedProfile.workspaceId);
-          setIsAuthenticated(true);
-        } else {
-          setConnectionError('Firebase is offline and no saved account is available on this device. Reconnect and try again.');
-        }
-      }
     }, 5000);
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user: any) => {
-      authStateReceived = true;
-      setAuthLoading(false);
-      setConnectionError(null);
-      
+    const loadSession = async () => {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        authStateReceived = true;
+        setAuthLoading(false);
+        setConnectionError(null);
+        const user = session?.user;
         if (user) {
-          if (user.email === 'jhaysimanuel@gmail.com') {
-            await checkAndElevateAdmin(user.uid).catch(err => console.warn(err));
-          }
           const profile = !navigator.onLine
-            ? getCachedUserProfile(user.uid)
-            : (await getCurrentUserProfile().catch(() => null)) || getCachedUserProfile(user.uid);
-          
+            ? getCachedUserProfile(user.id)
+            : (await getCurrentUserProfile().catch(() => null)) || getCachedUserProfile(user.id);
           setCurrentUserState(profile);
           if (profile) setCurrentUser(profile);
           setIsAuthenticated(!!profile);
           setConnectionError(null);
-          
           if (profile) {
-            // Background load workspaces & user preferences
             getWorkspaces().then(setWorkspaces).catch(err => console.warn(err));
-            getUserPreferences(user.uid).then(setUserPreferences).catch(err => console.warn(err));
-            
+            getUserPreferences(user.id).then(setUserPreferences).catch(err => console.warn(err));
             const wsId = profile.workspaceId || getActiveWorkspaceId();
             if (wsId) {
               syncEngine.initWorkspace(wsId);
-
-              // Real-time workspace metadata sync
               if (unsubscribeWs) unsubscribeWs();
-              unsubscribeWs = onSnapshot(doc(db, 'workspaces', wsId), (docSnap) => {
-                if (docSnap.exists()) {
-                  const updatedWs = docSnap.data() as Workspace;
+              unsubscribeWs = subscribeToWorkspaceMetadata(wsId, (updatedWs) => {
+                if (updatedWs) {
                   setWorkspaces(prev => {
                     const index = prev.findIndex(w => w.id === wsId);
                     if (index === -1) return [...prev, updatedWs];
@@ -168,13 +145,9 @@ export default function App() {
                   });
                 }
               });
-
-              // Real-time current user profile sync
               if (unsubscribeUserProf) unsubscribeUserProf();
-              unsubscribeUserProf = subscribeToUserProfile(user.uid, (updatedProfile) => {
-                if (updatedProfile) {
-                  setCurrentUserState(updatedProfile);
-                }
+              unsubscribeUserProf = subscribeToUserProfile(user.id, (updatedProfile) => {
+                if (updatedProfile) setCurrentUserState(updatedProfile);
               });
             }
           }
@@ -184,26 +157,39 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("Auth state processing error:", err);
-        setConnectionError('Firebase could not finish loading your account. Check your connection and try again.');
+        setConnectionError('Could not load your account. Check your connection and try again.');
       } finally {
         clearTimeout(loadingSafetyTimeout);
         setAuthLoading(false);
       }
+    };
+    loadSession();
+
+    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+      (async () => {
+        if (event === 'SIGNED_OUT') {
+          setCurrentUserState(null);
+          setIsAuthenticated(false);
+          setAuthLoading(false);
+          return;
+        }
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          await loadSession();
+        }
+      })();
     });
 
     return () => {
       clearTimeout(loadingSafetyTimeout);
-      unsubscribeAuth();
+      authSub.subscription.unsubscribe();
       if (unsubscribeWs) unsubscribeWs();
       if (unsubscribeUserProf) unsubscribeUserProf();
     };
   }, []);
 
-  // Load preferences whenever user account changes
   useEffect(() => {
     if (currentUser) {
-      const targetUid = auth.currentUser?.uid || currentUser.id;
-      getUserPreferences(targetUid).then(setUserPreferences).catch(err => console.warn(err));
+      getUserPreferences(currentUser.id).then(setUserPreferences).catch(err => console.warn(err));
     }
   }, [currentUser?.id]);
 
@@ -312,8 +298,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await auth.signOut();
+    await supabase.auth.signOut();
     setIsAuthenticated(false);
+    setCurrentUserState(null);
     showToast('Signed out of workspace');
   };
 
@@ -348,7 +335,7 @@ export default function App() {
   };
 
   const handleSwitchUser = (user: UserProfile) => {
-    const isAdmin = currentUser?.role === 'admin' || currentUser?.email === 'jhaysimanuel@gmail.com' || auth.currentUser?.email === 'jhaysimanuel@gmail.com';
+    const isAdmin = currentUser?.role === 'admin' || currentUser?.email === 'jhaysimanuel@gmail.com';
     if (!isAdmin) {
       showToast('Account switching is restricted to Admin users.');
       return;

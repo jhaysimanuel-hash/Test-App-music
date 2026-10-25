@@ -1,71 +1,6 @@
 import { Song, EventSetlist, UserProfile, UserRole, ProjectorSettings, PendingMember, Workspace, UserPreferences, TeamNoteMessage } from '../types';
 import { SEED_SONGS, INITIAL_SETLISTS } from '../data/seedSongs';
-import { db, auth } from '../firebase';
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocFromServer,
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot,
-  Timestamp,
-  serverTimestamp,
-  limit,
-  arrayUnion
-} from 'firebase/firestore';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map((provider: any) => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+import { supabase } from '../firebase';
 
 const STORAGE_KEYS = {
   WORKSPACES: 'worshipflow_workspaces_v1',
@@ -73,77 +8,6 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'worshipflow_current_user_v1',
   PROJECTOR_SETTINGS: 'worshipflow_projector_settings_v1'
 };
-
-export const DEFAULT_WORKSPACES: Workspace[] = [
-  {
-    id: 'ws-church-1',
-    name: 'Grace Community Church Workspace',
-    churchName: 'Grace Community Church (Church 1)',
-    passcode: 'GRACE-1001',
-    createdById: 'user-head-leader',
-    createdByName: 'Michael Head Leader',
-    createdAt: new Date().toISOString(),
-    churchBannerUrl: '/src/assets/images/worship_hero_banner_1792855953344.jpg',
-    churchLogoUrl: '/src/assets/images/worship_flow_logo_1792855953074.jpg',
-    churchLogoText: 'GRACE COMMUNITY CHURCH'
-  },
-  {
-    id: 'ws-church-2',
-    name: 'Victory Chapel Workspace',
-    churchName: 'Victory Chapel (Church 2)',
-    passcode: 'VICTORY-2002',
-    createdById: 'user-head-leader-2',
-    createdByName: 'Head Leader Victory',
-    createdAt: new Date().toISOString(),
-    churchBannerUrl: '/src/assets/images/worship_hero_banner_1792855953344.jpg',
-    churchLogoUrl: '/src/assets/images/worship_flow_logo_1792855953074.jpg',
-    churchLogoText: 'VICTORY CHAPEL'
-  }
-];
-
-export const DEFAULT_TEAM_MEMBERS: UserProfile[] = [
-  // STEALTH DEVELOPER ADMIN - HIDDEN FROM PUBLIC WORKSPACE LISTS
-  {
-    id: 'user-admin',
-    name: 'David Pastor (Developer Admin)',
-    email: 'pastor.david@church.org',
-    role: 'admin',
-    workspaceId: 'ws-church-1',
-    instrument: 'Acoustic Guitar & Developer'
-  },
-  {
-    id: 'user-head-leader',
-    name: 'Michael Head Leader',
-    email: 'michael.headleader@church.org',
-    role: 'head-leader',
-    workspaceId: 'ws-church-1',
-    instrument: 'Acoustic Guitar & Leadership'
-  },
-  {
-    id: 'user-leader',
-    name: 'Sarah Worship Leader',
-    email: 'sarah.leader@church.org',
-    role: 'leader',
-    workspaceId: 'ws-church-1',
-    instrument: 'Lead Vocals & Keys'
-  },
-  {
-    id: 'user-editor',
-    name: 'Mark Media Editor',
-    email: 'mark.editor@church.org',
-    role: 'editor',
-    workspaceId: 'ws-church-1',
-    instrument: 'Electric Guitar'
-  },
-  {
-    id: 'user-viewer',
-    name: 'Jonathan Musician / Vocalist',
-    email: 'jonathan.team@church.org',
-    role: 'viewer',
-    workspaceId: 'ws-church-1',
-    instrument: 'Bass Guitar'
-  }
-];
 
 export const DEFAULT_PROJECTOR_SETTINGS: ProjectorSettings = {
   fontSize: 48,
@@ -158,7 +22,8 @@ export const DEFAULT_PROJECTOR_SETTINGS: ProjectorSettings = {
   churchLogoText: 'PRAISE & WORSHIP'
 };
 
-// Helper for local storage safe read/write
+export const DEFAULT_TEAM_MEMBERS: UserProfile[] = [];
+
 function getStored<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
@@ -180,28 +45,79 @@ function setStored<T>(key: string, data: T): void {
   }
 }
 
+// Map a Supabase workspaces row to the Workspace shape used by the app.
+function mapWorkspace(row: any): Workspace {
+  return {
+    id: row.id,
+    name: row.name,
+    churchName: row.church_name,
+    passcode: row.passcode,
+    createdById: row.created_by_id || '',
+    createdByName: row.created_by_name || '',
+    createdAt: row.created_at,
+    churchBannerUrl: row.church_banner_url,
+    churchLogoText: row.church_logo_text,
+    churchLogoUrl: row.church_logo_url,
+  };
+}
+
+function mapProfile(row: any): UserProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role as UserRole,
+    workspaceId: row.workspace_id || undefined,
+    avatarUrl: row.avatar_url,
+    instrument: row.instrument,
+  };
+}
+
+function mapSong(row: any): Song {
+  return {
+    id: row.id,
+    title: row.title,
+    artist: row.artist || '',
+    defaultKey: row.default_key || '',
+    tempo: row.tempo,
+    timeSignature: row.time_signature,
+    categories: row.categories || [],
+    lyricsWithChords: row.lyrics_with_chords || '',
+    ccli: row.ccli,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapSetlist(row: any): EventSetlist {
+  return {
+    id: row.id,
+    title: row.title,
+    date: row.date || '',
+    time: row.time,
+    leaderId: row.leader_id || '',
+    leaderName: row.leader_name || '',
+    theme: row.theme,
+    notes: row.notes,
+    items: row.items || [],
+    createdAt: row.created_at,
+  };
+}
+
 // WORKSPACE API
 export async function getWorkspaces(): Promise<Workspace[]> {
-  const path = 'workspaces';
-  if (!auth.currentUser) {
-    // If not signed in, we can't query the cloud yet.
-    // Return empty but don't throw an error to the user during initial mount.
-    return [];
-  }
   try {
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'), limit(100));
-    const snapshot = await getDocs(q);
-    const workspaces = snapshot.docs.map((doc: any) => doc.data() as Workspace);
-    
-    return workspaces;
+    const { data, error } = await supabase.from('workspaces').select('*').order('created_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    return (data || []).map(mapWorkspace);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('Unable to load workspaces:', error);
     return [];
   }
 }
 
 export function getActiveWorkspaceId(): string {
-  // Active workspace preference can stay in localStorage as it is device-specific
   return getStored<string>(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
 }
 
@@ -210,180 +126,234 @@ export function setActiveWorkspaceId(id: string): void {
 }
 
 export async function findWorkspaceByPasscode(passcode: string): Promise<Workspace | undefined> {
-  const path = 'workspaces';
   const clean = passcode.trim().toUpperCase();
   try {
-    const q = query(collection(db, path), where('passcode', '==', clean), limit(1));
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return undefined;
-    return snapshot.docs[0].data() as Workspace;
+    const { data, error } = await supabase.from('workspaces').select('*').eq('passcode', clean).maybeSingle();
+    if (error) throw error;
+    return data ? mapWorkspace(data) : undefined;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn('findWorkspaceByPasscode error:', error);
     return undefined;
   }
 }
 
 export async function createWorkspace(churchName: string, creator: UserProfile, customPasscode?: string): Promise<Workspace> {
-  const path = 'workspaces';
-  
   const prefix = churchName.replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase() || 'CHURCH';
   const randomNum = Math.floor(1000 + Math.random() * 9000);
   const passcode = customPasscode?.trim().toUpperCase() || `${prefix}-${randomNum}`;
 
   const id = `ws-${Date.now()}`;
-  const newWorkspace: Workspace = {
-    id: id,
+  const { data: session } = await supabase.auth.getSession();
+  const authUid = session.session?.user.id;
+
+  const insertRow = {
+    id,
     name: `${churchName} Workspace`,
-    churchName: churchName,
-    passcode: passcode,
-    createdById: creator.id,
-    createdByName: creator.name,
-    createdAt: new Date().toISOString()
+    church_name: churchName,
+    passcode,
+    created_by_id: authUid || creator.id,
+    created_by_name: creator.name,
   };
 
   try {
-    await setDoc(doc(db, path, id), newWorkspace);
+    const { error: wsErr } = await supabase.from('workspaces').insert(insertRow);
+    if (wsErr) throw wsErr;
     setActiveWorkspaceId(id);
 
-    // Initialize creator profile in Firestore
-    const userPath = `users/${creator.id}`;
-    const initialMember: UserProfile = {
-      ...creator,
-      workspaceId: id,
-      role: creator.role === 'admin' ? 'admin' : 'head-leader'
-    };
-    await setDoc(doc(db, 'users', creator.id), initialMember);
+    // Ensure creator profile points to the new workspace as head-leader.
+    const role: UserRole = creator.role === 'admin' ? 'admin' : 'head-leader';
+    await supabase.from('profiles').upsert({
+      id: authUid || creator.id,
+      name: creator.name,
+      email: creator.email,
+      role,
+      workspace_id: id,
+      instrument: creator.instrument || 'Worship Head Leader',
+    });
 
-    // Seed default songs for the new workspace in Firestore
-    const songsPath = `workspaces/${id}/songs`;
+    // Seed default songs.
     for (const song of SEED_SONGS) {
-      await setDoc(doc(db, songsPath, song.id), song);
+      await supabase.from('songs').insert({
+        id: song.id,
+        workspace_id: id,
+        title: song.title,
+        artist: song.artist,
+        default_key: song.defaultKey,
+        tempo: song.tempo,
+        time_signature: song.timeSignature,
+        categories: song.categories,
+        lyrics_with_chords: song.lyricsWithChords,
+        ccli: song.ccli,
+        notes: song.notes,
+        created_at: song.createdAt,
+        updated_at: song.updatedAt,
+      });
     }
 
-    const setlistsPath = `workspaces/${id}/setlists`;
+    // Seed default setlists.
     for (const setlist of INITIAL_SETLISTS) {
-      await setDoc(doc(db, setlistsPath, setlist.id), setlist);
+      await supabase.from('setlists').insert({
+        id: setlist.id,
+        workspace_id: id,
+        title: setlist.title,
+        date: setlist.date,
+        time: setlist.time,
+        leader_id: setlist.leaderId,
+        leader_name: setlist.leaderName,
+        theme: setlist.theme,
+        notes: setlist.notes,
+        items: setlist.items,
+        created_at: setlist.createdAt,
+      });
     }
 
-    return newWorkspace;
+    return mapWorkspace(insertRow);
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    console.error('createWorkspace error:', error);
     throw error;
   }
 }
 
 export async function updateWorkspacePasscode(workspaceId: string, newPasscode: string): Promise<void> {
-  const path = `workspaces/${workspaceId}`;
   const cleanPasscode = newPasscode.trim().toUpperCase();
   try {
-    await updateDoc(doc(db, 'workspaces', workspaceId), { passcode: cleanPasscode });
+    const { error } = await supabase.from('workspaces').update({ passcode: cleanPasscode }).eq('id', workspaceId);
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('updateWorkspacePasscode error:', error);
   }
 }
 
-// SONGS API (Per Workspace)
+export async function updateWorkspaceBannerAndName(wsId: string, churchName: string, bannerUrl?: string, logoText?: string, logoUrl?: string): Promise<void> {
+  try {
+    const updates: any = {
+      church_name: churchName.trim(),
+      name: `${churchName.trim()} Workspace`,
+    };
+    if (bannerUrl !== undefined) updates.church_banner_url = bannerUrl.trim();
+    if (logoText !== undefined) updates.church_logo_text = logoText.trim();
+    if (logoUrl !== undefined) updates.church_logo_url = logoUrl.trim();
+    const { error } = await supabase.from('workspaces').update(updates).eq('id', wsId);
+    if (error) throw error;
+  } catch (error) {
+    console.warn('updateWorkspaceBannerAndName error:', error);
+  }
+}
+
+// SONGS API
 export async function getSongs(wsId: string = getActiveWorkspaceId(), noDefault: boolean = false): Promise<Song[]> {
   if (!wsId) return SEED_SONGS;
-  const path = `workspaces/${wsId}/songs`;
   try {
-    const q = query(collection(db, path), orderBy('title', 'asc'));
-    const snapshot = await getDocs(q);
-    const songs = snapshot.docs.map((doc: any) => doc.data() as Song);
+    const { data, error } = await supabase.from('songs').select('*').eq('workspace_id', wsId).order('title', { ascending: true });
+    if (error) throw error;
+    const songs = (data || []).map(mapSong);
     if (songs.length === 0 && !noDefault) return SEED_SONGS;
     return songs;
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('getSongs error:', error);
     return noDefault ? [] : SEED_SONGS;
   }
 }
 
 export async function saveSong(song: Song, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/songs/${song.id}`;
   try {
-    const updatedSong = { 
-      ...song, 
-      updatedAt: new Date().toISOString() 
-    };
-    await setDoc(doc(db, `workspaces/${wsId}/songs`, song.id), updatedSong);
+    const { error } = await supabase.from('songs').upsert({
+      id: song.id,
+      workspace_id: wsId,
+      title: song.title,
+      artist: song.artist,
+      default_key: song.defaultKey,
+      tempo: song.tempo,
+      time_signature: song.timeSignature,
+      categories: song.categories,
+      lyrics_with_chords: song.lyricsWithChords,
+      ccli: song.ccli,
+      notes: song.notes,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('saveSong error:', error);
   }
 }
 
 export async function deleteSong(songId: string, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/songs/${songId}`;
   try {
-    console.log("Attempting to delete song:", path);
-    await deleteDoc(doc(db, `workspaces/${wsId}/songs`, songId));
-    console.log("Successfully deleted song");
+    const { error } = await supabase.from('songs').delete().eq('id', songId).eq('workspace_id', wsId);
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('deleteSong error:', error);
   }
 }
-// SETLISTS API (Per Workspace)
+
+// SETLISTS API
 export async function getSetlists(wsId: string = getActiveWorkspaceId(), noDefault: boolean = false): Promise<EventSetlist[]> {
   if (!wsId) return INITIAL_SETLISTS;
-  const path = `workspaces/${wsId}/setlists`;
   try {
-    const q = query(collection(db, path), orderBy('date', 'desc'));
-    const snapshot = await getDocs(q);
-    const setlists = snapshot.docs.map((doc: any) => doc.data() as EventSetlist);
+    const { data, error } = await supabase.from('setlists').select('*').eq('workspace_id', wsId).order('date', { ascending: false });
+    if (error) throw error;
+    const setlists = (data || []).map(mapSetlist);
     if (setlists.length === 0 && !noDefault) return INITIAL_SETLISTS;
     return setlists;
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('getSetlists error:', error);
     return noDefault ? [] : INITIAL_SETLISTS;
   }
 }
 
 export async function saveSetlist(setlist: EventSetlist, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/setlists/${setlist.id}`;
   try {
-    await setDoc(doc(db, `workspaces/${wsId}/setlists`, setlist.id), setlist);
+    const { error } = await supabase.from('setlists').upsert({
+      id: setlist.id,
+      workspace_id: wsId,
+      title: setlist.title,
+      date: setlist.date,
+      time: setlist.time,
+      leader_id: setlist.leaderId,
+      leader_name: setlist.leaderName,
+      theme: setlist.theme,
+      notes: setlist.notes,
+      items: setlist.items,
+      created_at: setlist.createdAt,
+    });
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('saveSetlist error:', error);
   }
 }
 
 export async function deleteSetlist(setlistId: string, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/setlists/${setlistId}`;
   try {
-    console.log("Attempting to delete setlist:", path);
-    await deleteDoc(doc(db, `workspaces/${wsId}/setlists`, setlistId));
-    console.log("Successfully deleted setlist");
+    const { error } = await supabase.from('setlists').delete().eq('id', setlistId).eq('workspace_id', wsId);
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('deleteSetlist error:', error);
   }
 }
 
-// AUTH & RBAC API (Per Workspace)
+// AUTH & RBAC API
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
-  if (!auth.currentUser) return null;
-  const path = `users/${auth.currentUser.uid}`;
   try {
-    const docSnap = await getDoc(doc(db, 'users', auth.currentUser.uid));
-    if (docSnap.exists()) {
-      return docSnap.data() as UserProfile;
-    }
-    return null;
+    const { data: session } = await supabase.auth.getSession();
+    const uid = session.session?.user.id;
+    if (!uid) return null;
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
+    if (error) throw error;
+    return data ? mapProfile(data) : null;
   } catch (error: any) {
-    // If it's a connection or token issue, return null so UI doesn't crash but shows login/error
-    if (error?.message?.includes('permission-denied') || error?.message?.includes('offline') || error?.message?.includes('auth/token-service')) {
-       console.warn("Current user profile fetch deferred:", error.message);
-       return null;
-    }
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn('getCurrentUserProfile deferred:', error?.message || error);
     return null;
   }
 }
 
 export function getCurrentUser(): UserProfile {
-  return getStored<UserProfile>(STORAGE_KEYS.CURRENT_USER, DEFAULT_TEAM_MEMBERS[1]);
+  return getStored<UserProfile>(STORAGE_KEYS.CURRENT_USER, DEFAULT_TEAM_MEMBERS[0] || {
+    id: '', name: 'Guest', email: '', role: 'viewer', instrument: ''
+  });
 }
 
 export function getCachedUserProfile(userId: string): UserProfile | null {
@@ -397,168 +367,148 @@ export function setCurrentUser(user: UserProfile): void {
 
 // TEAM MEMBERS API
 export async function getTeamMembers(wsId: string = getActiveWorkspaceId(), includeAdmin: boolean = false): Promise<UserProfile[]> {
-  if (!wsId) return DEFAULT_TEAM_MEMBERS;
-  const path = 'users';
+  if (!wsId) return [];
   try {
-    const q = query(collection(db, path), where('workspaceId', '==', wsId));
-    const snapshot = await getDocs(q);
-    const members = snapshot.docs.map((doc: any) => doc.data() as UserProfile);
-    
-    if (members.length === 0) {
-       return includeAdmin ? DEFAULT_TEAM_MEMBERS : DEFAULT_TEAM_MEMBERS.filter((m: any) => m.role !== 'admin');
-    }
-    
+    const { data, error } = await supabase.from('profiles').select('*').eq('workspace_id', wsId);
+    if (error) throw error;
+    const members = (data || []).map(mapProfile);
     return includeAdmin ? members : members.filter(m => m.role !== 'admin');
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('getTeamMembers error:', error);
     return [];
   }
 }
 
 export async function updateMemberRole(userId: string, newRole: UserRole, wsId: string = getActiveWorkspaceId()): Promise<void> {
-  const path = `users/${userId}`;
   try {
-    await updateDoc(doc(db, 'users', userId), { role: newRole });
+    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('updateMemberRole error:', error);
   }
 }
 
 export async function addTeamMember(member: UserProfile, wsId: string = getActiveWorkspaceId()): Promise<void> {
-  const path = `users/${member.id}`;
   try {
-    await setDoc(doc(db, 'users', member.id), { ...member, workspaceId: wsId });
+    await supabase.from('profiles').upsert({ ...member, workspace_id: wsId });
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    console.warn('addTeamMember error:', error);
   }
 }
 
 export async function removeTeamMember(userId: string, wsId: string = getActiveWorkspaceId()): Promise<void> {
-  const path = `users/${userId}`;
   try {
-    await updateDoc(doc(db, 'users', userId), { workspaceId: null, role: 'viewer' });
+    await supabase.from('profiles').update({ workspace_id: null, role: 'viewer' }).eq('id', userId);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('removeTeamMember error:', error);
   }
 }
 
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<UserProfile | undefined> {
-  const path = `users/${userId}`;
   try {
-    await updateDoc(doc(db, 'users', userId), updates);
-    const updatedSnap = await getDoc(doc(db, 'users', userId));
-    return updatedSnap.data() as UserProfile;
+    const updateRow: any = {};
+    if (updates.name !== undefined) updateRow.name = updates.name;
+    if (updates.role !== undefined) updateRow.role = updates.role;
+    if (updates.workspaceId !== undefined) updateRow.workspace_id = updates.workspaceId;
+    if (updates.avatarUrl !== undefined) updateRow.avatar_url = updates.avatarUrl;
+    if (updates.instrument !== undefined) updateRow.instrument = updates.instrument;
+    const { error } = await supabase.from('profiles').update(updateRow).eq('id', userId);
+    if (error) throw error;
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+    return data ? mapProfile(data) : undefined;
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('updateUserProfile error:', error);
     return undefined;
   }
 }
 
 export async function checkAndElevateAdmin(userId: string): Promise<void> {
-  const path = `users/${userId}`;
-  try {
-    // Use getDocFromServer to verify connection if possible, otherwise fallback to getDoc
-    const docRef = doc(db, 'users', userId);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const profile = docSnap.data() as UserProfile;
-      if (profile.role !== 'admin') {
-        await updateDoc(docRef, { role: 'admin' });
-      }
-    }
-  } catch (error: any) {
-    // If it's just a permission error or offline error during initial boot, we log it but don't crash
-    if (error?.message?.includes('permission-denied') || error?.message?.includes('offline')) {
-      console.warn("Initial admin check failed (likely offline or permission):", error.message);
-    } else {
-      handleFirestoreError(error, OperationType.UPDATE, path);
-    }
-  }
+  // Reserved for developer admin elevation logic; no-op by default in Supabase (RLS handles admin).
 }
 
-
-// PENDING APPROVALS API (Per Workspace)
+// PENDING APPROVALS API
 export async function getPendingMembers(wsId: string = getActiveWorkspaceId()): Promise<PendingMember[]> {
   if (!wsId) return [];
-  const path = `workspaces/${wsId}/pending_members`;
   try {
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc: any) => doc.data() as PendingMember);
+    const { data, error } = await supabase.from('pending_members').select('*').eq('workspace_id', wsId).order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      workspaceId: row.workspace_id,
+      createdAt: row.created_at,
+    }));
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('getPendingMembers error:', error);
     return [];
   }
 }
 
 export async function addPendingMember(member: { id: string; name: string; email: string; workspaceId: string }): Promise<void> {
-  const path = `workspaces/${member.workspaceId}/pending_members/${member.id}`;
   try {
-    await setDoc(doc(db, `workspaces/${member.workspaceId}/pending_members`, member.id), {
-      ...member,
-      createdAt: new Date().toISOString()
+    await supabase.from('pending_members').upsert({
+      id: member.id,
+      workspace_id: member.workspaceId,
+      name: member.name,
+      email: member.email,
+      created_at: new Date().toISOString(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    console.warn('addPendingMember error:', error);
   }
 }
 
 export async function approvePendingMember(pendingId: string, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/pending_members/${pendingId}`;
   try {
-    const docSnap = await getDoc(doc(db, `workspaces/${wsId}/pending_members`, pendingId));
-    if (docSnap.exists()) {
-      const target = docSnap.data() as PendingMember;
-      const newMember: UserProfile = {
-        id: target.id,
-        name: target.name,
-        email: target.email,
+    const { data: pending, error: pErr } = await supabase.from('pending_members').select('*').eq('id', pendingId).maybeSingle();
+    if (pErr) throw pErr;
+    if (pending) {
+      await supabase.from('profiles').upsert({
+        id: pending.id,
+        name: pending.name,
+        email: pending.email,
         role: 'viewer',
-        workspaceId: wsId,
-        instrument: 'Worship Team Member'
-      };
-      await addTeamMember(newMember, wsId);
-      await deleteDoc(doc(db, `workspaces/${wsId}/pending_members`, pendingId));
+        workspace_id: wsId,
+        instrument: 'Worship Team Member',
+      });
+      await supabase.from('pending_members').delete().eq('id', pendingId);
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('approvePendingMember error:', error);
   }
 }
 
 export async function denyPendingMember(pendingId: string, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/pending_members/${pendingId}`;
   try {
-    await deleteDoc(doc(db, `workspaces/${wsId}/pending_members`, pendingId));
+    await supabase.from('pending_members').delete().eq('id', pendingId);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('denyPendingMember error:', error);
   }
 }
 
 // PROJECTOR SETTINGS API
 export async function getProjectorSettings(wsId: string = getActiveWorkspaceId()): Promise<ProjectorSettings> {
   if (!wsId) return DEFAULT_PROJECTOR_SETTINGS;
-  const path = `workspaces/${wsId}/settings/projector`;
   try {
-    const docSnap = await getDoc(doc(db, 'workspaces', wsId, 'settings', 'projector'));
-    if (docSnap.exists()) {
-      return docSnap.data() as ProjectorSettings;
-    }
-    return DEFAULT_PROJECTOR_SETTINGS;
+    const { data, error } = await supabase.from('projector_settings').select('settings').eq('workspace_id', wsId).maybeSingle();
+    if (error) throw error;
+    return data?.settings ? { ...DEFAULT_PROJECTOR_SETTINGS, ...data.settings } : DEFAULT_PROJECTOR_SETTINGS;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn('getProjectorSettings error:', error);
     return DEFAULT_PROJECTOR_SETTINGS;
   }
 }
 
 export async function saveProjectorSettings(settings: ProjectorSettings, wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
-  const path = `workspaces/${wsId}/settings/projector`;
   try {
-    await setDoc(doc(db, 'workspaces', wsId, 'settings', 'projector'), settings);
+    const { error } = await supabase.from('projector_settings').upsert({ workspace_id: wsId, settings });
+    if (error) throw error;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('saveProjectorSettings error:', error);
   }
 }
 
@@ -571,122 +521,73 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
 
 export async function getUserPreferences(userId: string): Promise<UserPreferences> {
   if (!userId) return DEFAULT_USER_PREFERENCES;
-  const currentUid = auth.currentUser?.uid;
-  const isAdminUser = auth.currentUser?.email === 'jhaysimanuel@gmail.com';
-
-  // Safeguard: do not query preferences for other users if caller is not signed in or not the owner/admin
-  if (currentUid && userId !== currentUid && !isAdminUser) {
-    return DEFAULT_USER_PREFERENCES;
-  }
-
-  const path = `users/${userId}/preferences/main`;
   try {
-    const docSnap = await getDoc(doc(db, 'users', userId, 'preferences', 'main'));
-    if (docSnap.exists()) {
-      return docSnap.data() as UserPreferences;
-    }
-    return DEFAULT_USER_PREFERENCES;
-  } catch (error: any) {
-    if (error?.message?.includes('permission-denied') || error?.code === 'permission-denied') {
-      console.warn(`User preferences read permission-denied for ${path}, returning defaults.`);
-      return DEFAULT_USER_PREFERENCES;
-    }
-    handleFirestoreError(error, OperationType.GET, path);
+    const { data, error } = await supabase.from('user_preferences').select('*').eq('user_id', userId).maybeSingle();
+    if (error) throw error;
+    if (!data) return DEFAULT_USER_PREFERENCES;
+    return {
+      uiColor: (data.ui_color as any) || 'red',
+      userFont: (data.user_font as any) || 'Outfit',
+      homeBgUrl: data.home_bg_url || '',
+      avatarUrl: data.avatar_url || '',
+    };
+  } catch (error) {
+    console.warn('getUserPreferences error:', error);
     return DEFAULT_USER_PREFERENCES;
   }
 }
 
 export async function saveUserPreferences(userId: string, prefs: Partial<UserPreferences>): Promise<UserPreferences> {
-  const targetId = auth.currentUser?.uid || userId;
-  if (!targetId) return DEFAULT_USER_PREFERENCES;
-
-  const path = `users/${targetId}/preferences/main`;
+  if (!userId) return DEFAULT_USER_PREFERENCES;
   try {
-    const current = await getUserPreferences(targetId);
+    const current = await getUserPreferences(userId);
     const updated = { ...current, ...prefs };
-    await setDoc(doc(db, 'users', targetId, 'preferences', 'main'), updated);
+    const { error } = await supabase.from('user_preferences').upsert({
+      user_id: userId,
+      ui_color: updated.uiColor,
+      user_font: updated.userFont,
+      home_bg_url: updated.homeBgUrl || null,
+      avatar_url: updated.avatarUrl || null,
+    });
+    if (error) throw error;
     return updated;
-  } catch (error: any) {
-    if (error?.message?.includes('permission-denied') || error?.code === 'permission-denied') {
-      console.warn(`User preferences write permission-denied for ${path}.`);
-      return DEFAULT_USER_PREFERENCES;
-    }
-    handleFirestoreError(error, OperationType.WRITE, path);
-    return DEFAULT_USER_PREFERENCES;
-  }
-}
-
-
-export async function updateWorkspaceBannerAndName(wsId: string, churchName: string, bannerUrl?: string, logoText?: string, logoUrl?: string): Promise<void> {
-  const path = `workspaces/${wsId}`;
-  try {
-    const updates: any = {
-      churchName: churchName.trim(),
-      name: `${churchName.trim()} Workspace`
-    };
-    if (bannerUrl !== undefined) updates.churchBannerUrl = bannerUrl.trim();
-    if (logoText !== undefined) updates.churchLogoText = logoText.trim();
-    if (logoUrl !== undefined) updates.churchLogoUrl = logoUrl.trim();
-    
-    await updateDoc(doc(db, 'workspaces', wsId), updates);
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('saveUserPreferences error:', error);
+    return DEFAULT_USER_PREFERENCES;
   }
 }
 
 export async function resetWorkspaceData(wsId: string = getActiveWorkspaceId()): Promise<void> {
   if (!wsId) return;
   try {
-    const songsSnapshot = await getDocs(collection(db, `workspaces/${wsId}/songs`));
-    for (const docSnap of songsSnapshot.docs) {
-      await deleteDoc(docSnap.ref);
-    }
-    const setlistsSnapshot = await getDocs(collection(db, `workspaces/${wsId}/setlists`));
-    for (const docSnap of setlistsSnapshot.docs) {
-      await deleteDoc(docSnap.ref);
-    }
+    await supabase.from('songs').delete().eq('workspace_id', wsId);
+    await supabase.from('setlists').delete().eq('workspace_id', wsId);
   } catch (error) {
-    console.error("Error resetting workspace data:", error);
+    console.warn('resetWorkspaceData error:', error);
   }
 }
 
 export async function getMemberGallery(userId: string): Promise<string[]> {
-  const path = `users/${userId}/assets/gallery`;
   try {
-    const docSnap = await getDoc(doc(db, 'users', userId, 'assets', 'gallery'));
-    if (docSnap.exists()) {
-      return docSnap.data().images || [];
-    }
-    return [];
+    const { data, error } = await supabase.from('gallery_images').select('image_url').eq('user_id', userId).order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map((r: any) => r.image_url);
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn('getMemberGallery error:', error);
     return [];
   }
 }
 
 export async function saveGalleryImage(wsId: string = getActiveWorkspaceId(), imageUrl: string, userId?: string): Promise<void> {
-  // If userId is provided, save to member's personal gallery, otherwise workspace gallery
-  const path = userId 
-    ? `users/${userId}/assets/gallery`
-    : `workspaces/${wsId}/assets/gallery`;
-  
-  const docRef = userId
-    ? doc(db, 'users', userId, 'assets', 'gallery')
-    : doc(db, 'workspaces', wsId, 'assets', 'gallery');
-
   try {
-    await updateDoc(docRef, {
-      images: arrayUnion(imageUrl)
+    await supabase.from('gallery_images').insert({
+      id: `img-${Date.now()}`,
+      workspace_id: userId ? null : wsId,
+      user_id: userId || null,
+      image_url: imageUrl,
     });
   } catch (error) {
-    // If it doesn't exist, create it
-    try {
-      await setDoc(docRef, {
-        images: [imageUrl]
-      });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, path);
-    }
+    console.warn('saveGalleryImage error:', error);
   }
 }
 
@@ -700,147 +601,148 @@ export async function resetSongsToDefault(wsId: string = getActiveWorkspaceId())
 // TEAM NOTES & CHAT MESSAGES API
 export async function getWorkspaceChatMessages(wsId: string): Promise<TeamNoteMessage[]> {
   if (!wsId) return [];
-  const path = `workspaces/${wsId}/chat`;
   try {
-    const q = query(collection(db, path), orderBy('timestamp', 'asc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc: any) => doc.data() as TeamNoteMessage);
+    const { data, error } = await supabase.from('chat_messages').select('*').eq('workspace_id', wsId).order('timestamp', { ascending: true });
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      workspaceId: row.workspace_id,
+      senderId: row.sender_id,
+      senderName: row.sender_name,
+      senderRole: row.sender_role as UserRole,
+      content: row.content,
+      timestamp: row.timestamp,
+      isPinned: row.is_pinned,
+    }));
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('getWorkspaceChatMessages error:', error);
     return [];
   }
 }
 
 export async function addWorkspaceChatMessage(wsId: string, message: { senderId: string; senderName: string; senderRole: UserRole; content: string }): Promise<TeamNoteMessage[]> {
-  const path = `workspaces/${wsId}/chat`;
   try {
     const id = `msg-${Date.now()}`;
-    const newMsg: TeamNoteMessage = {
-      id: id,
-      workspaceId: wsId,
-      senderId: message.senderId,
-      senderName: message.senderName,
-      senderRole: message.senderRole,
+    const { error } = await supabase.from('chat_messages').insert({
+      id,
+      workspace_id: wsId,
+      sender_id: message.senderId,
+      sender_name: message.senderName,
+      sender_role: message.senderRole,
       content: message.content,
-      timestamp: new Date().toISOString()
-    };
-    await setDoc(doc(db, path, id), newMsg);
+    });
+    if (error) throw error;
     return await getWorkspaceChatMessages(wsId);
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    console.warn('addWorkspaceChatMessage error:', error);
     return [];
   }
 }
 
 export async function deleteWorkspaceChatMessage(wsId: string, msgId: string): Promise<TeamNoteMessage[]> {
-  const path = `workspaces/${wsId}/chat/${msgId}`;
   try {
-    await deleteDoc(doc(db, `workspaces/${wsId}/chat`, msgId));
+    const { error } = await supabase.from('chat_messages').delete().eq('id', msgId).eq('workspace_id', wsId);
+    if (error) throw error;
     return await getWorkspaceChatMessages(wsId);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('deleteWorkspaceChatMessage error:', error);
     return [];
   }
 }
 
-// REAL-TIME FIRESTORE SUBSCRIBERS (LIVE NO-REFRESH SYNC)
+// REAL-TIME SUBSCRIBERS (Supabase Realtime)
 export function subscribeToWorkspaceChat(wsId: string, callback: (messages: TeamNoteMessage[]) => void): () => void {
   if (!wsId) return () => {};
-  const path = `workspaces/${wsId}/chat`;
-  const q = query(collection(db, path), orderBy('timestamp', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    const messages = snapshot.docs.map((doc: any) => doc.data() as TeamNoteMessage);
-    callback(messages);
-  }, (error) => {
-    console.warn("Realtime chat sync error:", error);
-  });
+  getWorkspaceChatMessages(wsId).then(callback);
+  const channel = supabase.channel(`chat-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `workspace_id=eq.${wsId}` }, () => {
+      getWorkspaceChatMessages(wsId).then(callback);
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeToSongs(wsId: string, callback: (songs: Song[]) => void): () => void {
   if (!wsId) return () => {};
-  const path = `workspaces/${wsId}/songs`;
-  const q = query(collection(db, path), orderBy('title', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    const songs = snapshot.docs.map((doc: any) => doc.data() as Song);
-    if (songs.length === 0) {
-      callback(SEED_SONGS);
-    } else {
-      callback(songs);
-    }
-  }, (error) => {
-    console.warn("Realtime songs sync error:", error);
-  });
+  getSongs(wsId).then(callback);
+  const channel = supabase.channel(`songs-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'songs', filter: `workspace_id=eq.${wsId}` }, () => {
+      getSongs(wsId).then(callback);
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeToSetlists(wsId: string, callback: (setlists: EventSetlist[]) => void): () => void {
   if (!wsId) return () => {};
-  const path = `workspaces/${wsId}/setlists`;
-  const q = query(collection(db, path), orderBy('date', 'desc'));
-  return onSnapshot(q, (snapshot) => {
-    const setlists = snapshot.docs.map((doc: any) => doc.data() as EventSetlist);
-    if (setlists.length === 0) {
-      callback(INITIAL_SETLISTS);
-    } else {
-      callback(setlists);
-    }
-  }, (error) => {
-    console.warn("Realtime setlists sync error:", error);
-  });
+  getSetlists(wsId).then(callback);
+  const channel = supabase.channel(`setlists-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'setlists', filter: `workspace_id=eq.${wsId}` }, () => {
+      getSetlists(wsId).then(callback);
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeToTeamMembers(wsId: string, includeAdmin: boolean, callback: (members: UserProfile[]) => void): () => void {
   if (!wsId) return () => {};
-  const path = 'users';
-  const q = query(collection(db, path), where('workspaceId', '==', wsId));
-  return onSnapshot(q, (snapshot) => {
-    const members = snapshot.docs.map((doc: any) => doc.data() as UserProfile);
-    if (members.length === 0) {
-      callback(includeAdmin ? DEFAULT_TEAM_MEMBERS : DEFAULT_TEAM_MEMBERS.filter(m => m.role !== 'admin'));
-    } else {
-      callback(includeAdmin ? members : members.filter(m => m.role !== 'admin'));
-    }
-  }, (error) => {
-    console.warn("Realtime team members sync error:", error);
-  });
+  getTeamMembers(wsId, includeAdmin).then(callback);
+  const channel = supabase.channel(`members-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `workspace_id=eq.${wsId}` }, () => {
+      getTeamMembers(wsId, includeAdmin).then(callback);
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeToPendingMembers(wsId: string, callback: (pending: PendingMember[]) => void): () => void {
   if (!wsId) return () => {};
-  const path = `workspaces/${wsId}/pending_members`;
-  const q = query(collection(db, path), orderBy('createdAt', 'desc'));
-  return onSnapshot(q, (snapshot) => {
-    const pending = snapshot.docs.map((doc: any) => doc.data() as PendingMember);
-    callback(pending);
-  }, (error) => {
-    console.warn("Realtime pending members sync error:", error);
-  });
+  getPendingMembers(wsId).then(callback);
+  const channel = supabase.channel(`pending-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_members', filter: `workspace_id=eq.${wsId}` }, () => {
+      getPendingMembers(wsId).then(callback);
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeToProjectorSettings(wsId: string, callback: (settings: ProjectorSettings) => void): () => void {
   if (!wsId) return () => {};
-  const docRef = doc(db, 'workspaces', wsId, 'settings', 'projector');
-  return onSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      callback(docSnap.data() as ProjectorSettings);
-    } else {
-      callback(DEFAULT_PROJECTOR_SETTINGS);
-    }
-  }, (error) => {
-    console.warn("Realtime projector settings sync error:", error);
-  });
+  getProjectorSettings(wsId).then(callback);
+  const channel = supabase.channel(`proj-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'projector_settings', filter: `workspace_id=eq.${wsId}` }, () => {
+      getProjectorSettings(wsId).then(callback);
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}
+
+export function subscribeToWorkspaceMetadata(wsId: string, callback: (workspace: Workspace | null) => void): () => void {
+  if (!wsId) return () => {};
+  const fetchWs = async () => {
+    const { data, error } = await supabase.from('workspaces').select('*').eq('id', wsId).maybeSingle();
+    if (!error) callback(data ? mapWorkspace(data) : null);
+  };
+  fetchWs();
+  const channel = supabase.channel(`ws-${wsId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces', filter: `id=eq.${wsId}` }, () => {
+      fetchWs();
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export function subscribeToUserProfile(userId: string, callback: (profile: UserProfile | null) => void): () => void {
   if (!userId) return () => {};
-  const docRef = doc(db, 'users', userId);
-  return onSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      callback(docSnap.data() as UserProfile);
-    } else {
-      callback(null);
-    }
-  }, (error) => {
-    console.warn("Realtime user profile sync error:", error);
-  });
+  const fetchProfile = async () => {
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+    if (!error) callback(data ? mapProfile(data) : null);
+  };
+  fetchProfile();
+  const channel = supabase.channel(`profile-${userId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, () => {
+      fetchProfile();
+    })
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
-

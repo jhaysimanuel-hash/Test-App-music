@@ -1,37 +1,16 @@
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
-  signInWithPopup,
-  signInWithRedirect,
-  setPersistence, 
-  browserLocalPersistence 
-} from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { createClient } from '@supabase/supabase-js';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Prepare persistent sessions before opening the sign-in popup.
-const persistenceReady = setPersistence(auth, browserLocalPersistence).catch(err => {
-  console.warn("Firebase Auth persistence setup error:", err);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
 });
 
-export const googleProvider = new GoogleAuthProvider();
-
-export async function signInWithGoogle() {
-  try {
-    await persistenceReady;
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
-  } catch (error: any) {
-    if (error?.code === 'auth/popup-blocked') {
-      await signInWithRedirect(auth, googleProvider);
-      return null;
-    }
-    console.error("Error signing in with Google:", error);
-    throw error;
-  }
-}
+// Re-exported under the legacy name so existing imports of { auth, db } keep working.
+export const auth = supabase.auth;
+export const db = supabase;
