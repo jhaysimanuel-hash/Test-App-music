@@ -109,16 +109,18 @@ export default function App() {
     let unsubscribeUserProf: (() => void) | null = null;
     let authStateReceived = false;
 
-    // Auth can resolve before Firestore profile loading finishes. Keep the app usable if the cloud request stalls.
+    // Auth can resolve before Firestore profile loading finishes. Keep the login screen usable while cloud data loads.
     const loadingSafetyTimeout = setTimeout(() => {
+      setAuthLoading(false);
       if (authStateReceived && auth.currentUser) {
         setConnectionError('Firebase connected to your account, but the Firestore profile request did not finish. Check your connection and try again.');
       }
-      setAuthLoading(false);
-    }, 8000);
+    }, 5000);
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user: any) => {
       authStateReceived = true;
+      setAuthLoading(false);
+      setConnectionError(null);
       
       try {
         if (user) {
