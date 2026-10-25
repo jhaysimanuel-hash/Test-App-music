@@ -1,0 +1,194 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile information and role.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "head-leader", "leader", "editor", "viewer"] },
+        "workspaceId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "avatarUrl": { "type": "string" },
+        "instrument": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "UserPreferences": {
+      "title": "User Preferences",
+      "description": "User UI preferences.",
+      "type": "object",
+      "properties": {
+        "uiColor": { "type": "string", "enum": ["red", "blue", "green", "amber", "purple", "teal", "rose"] },
+        "userFont": { "type": "string", "enum": ["Outfit", "Plus Jakarta Sans", "Playfair Display", "Space Grotesk", "Inter"] },
+        "homeBgUrl": { "type": "string" },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["uiColor", "userFont"]
+    },
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Church workspace configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "churchName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "passcode": { "type": "string", "pattern": "^[A-Z0-9\\-]+$" },
+        "createdById": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "churchBannerUrl": { "type": "string" },
+        "churchLogoText": { "type": "string", "maxLength": 100 },
+        "churchLogoUrl": { "type": "string" }
+      },
+      "required": ["id", "name", "churchName", "passcode", "createdById", "createdByName", "createdAt"]
+    },
+    "Song": {
+      "title": "Song",
+      "description": "Worship song in the library.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "artist": { "type": "string", "maxLength": 100 },
+        "defaultKey": { "type": "string", "maxLength": 10 },
+        "tempo": { "type": "number" },
+        "timeSignature": { "type": "string", "maxLength": 10 },
+        "categories": { "type": "array", "items": { "type": "string" } },
+        "lyricsWithChords": { "type": "string", "maxLength": 10000 },
+        "ccli": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "artist", "defaultKey", "lyricsWithChords", "createdAt", "updatedAt"]
+    },
+    "EventSetlist": {
+      "title": "Event Setlist",
+      "description": "Worship event setlist.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "date": { "type": "string", "format": "date" },
+        "time": { "type": "string" },
+        "leaderId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "leaderName": { "type": "string" },
+        "theme": { "type": "string", "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "items": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "date", "leaderId", "leaderName", "items", "createdAt"]
+    },
+    "TeamNoteMessage": {
+      "title": "Team Note Message",
+      "description": "Chat message in the workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["admin", "head-leader", "leader", "editor", "viewer"] },
+        "content": { "type": "string", "maxLength": 2000 },
+        "timestamp": { "type": "string" },
+        "isPinned": { "type": "boolean" }
+      },
+      "required": ["id", "workspaceId", "senderId", "senderName", "senderRole", "content", "timestamp"]
+    },
+    "LiveSessionState": {
+      "title": "Live Session State",
+      "description": "Real-time state for live stage sync.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "activeEventId": { "type": "string" },
+        "activeSongId": { "type": "string" },
+        "activeSectionId": { "type": "string" },
+        "activeSectionLabel": { "type": "string" },
+        "activeSectionContent": { "type": "string" },
+        "activeSongTitle": { "type": "string" },
+        "activeArtist": { "type": "string" },
+        "currentKey": { "type": "string" },
+        "isBlackout": { "type": "boolean" },
+        "showLogo": { "type": "boolean" },
+        "stageMessage": { "type": "string", "maxLength": 500 },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["roomId", "activeEventId", "activeSongId", "updatedBy", "updatedAt"]
+    },
+    "ProjectorSettings": {
+      "title": "Projector Settings",
+      "description": "Settings for the projector display.",
+      "type": "object",
+      "properties": {
+        "fontSize": { "type": "number" },
+        "fontFamily": { "type": "string", "enum": ["Outfit", "Plus Jakarta Sans", "Playfair Display", "monospace"] },
+        "textColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "bgColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "accentColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "alignment": { "type": "string", "enum": ["center", "left"] },
+        "verticalPosition": { "type": "string", "enum": ["center", "lower-third"] },
+        "lineSpacing": { "type": "string", "enum": ["tight", "normal", "relaxed"] },
+        "showSongTitleBanner": { "type": "boolean" },
+        "churchLogoText": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["fontSize", "fontFamily", "textColor", "bgColor", "accentColor", "alignment", "verticalPosition", "lineSpacing", "showSongTitleBanner", "churchLogoText"]
+    },
+    "PendingMember": {
+      "title": "Pending Member",
+      "description": "User waiting for workspace approval.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "workspaceId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "workspaceId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles."
+    },
+    "/users/{userId}/preferences/main": {
+      "schema": "UserPreferences",
+      "description": "User UI settings."
+    },
+    "/workspaces/{workspaceId}": {
+      "schema": "Workspace",
+      "description": "Workspace data."
+    },
+    "/workspaces/{workspaceId}/songs/{songId}": {
+      "schema": "Song",
+      "description": "Songs in workspace."
+    },
+    "/workspaces/{workspaceId}/setlists/{setlistId}": {
+      "schema": "EventSetlist",
+      "description": "Setlists in workspace."
+    },
+    "/workspaces/{workspaceId}/chat/{messageId}": {
+      "schema": "TeamNoteMessage",
+      "description": "Chat messages in workspace."
+    },
+    "/workspaces/{workspaceId}/live/current": {
+      "schema": "LiveSessionState",
+      "description": "Active live state."
+    },
+    "/workspaces/{workspaceId}/settings/projector": {
+      "schema": "ProjectorSettings",
+      "description": "Projector settings."
+    },
+    "/workspaces/{workspaceId}/pending_members/{pendingId}": {
+      "schema": "PendingMember",
+      "description": "Pending member requests."
+    }
+  }
+}

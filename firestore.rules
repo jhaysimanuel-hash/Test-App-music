@@ -1,0 +1,134 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Bootstrapped Admin: Explicitly grant admin privileges to the primary developer email
+    function isBootstrappedAdmin() {
+      return isSignedIn() && request.auth.token.email == 'jhaysimanuel@gmail.com';
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // RBAC Helpers
+    function userExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+
+    function getWorkspaceRole(workspaceId) {
+      let userData = getUserData(request.auth.uid);
+      return (userData != null && 'workspaceId' in userData && userData.workspaceId == workspaceId) ? userData.role : null;
+    }
+
+    function hasWorkspaceRole(workspaceId, roles) {
+      return isBootstrappedAdmin() || (getWorkspaceRole(workspaceId) in roles);
+    }
+
+    function isGlobalAdmin() {
+      return isBootstrappedAdmin() || (userExists(request.auth.uid) && getUserData(request.auth.uid).role == 'admin');
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'email', 'role']) &&
+             data.keys().hasOnly(['id', 'name', 'email', 'role', 'workspaceId', 'avatarUrl', 'instrument']) &&
+             data.id == userId &&
+             data.name is string && data.name.size() <= 100 &&
+             data.email is string && data.email.size() <= 200 &&
+             data.role in ['admin', 'head-leader', 'leader', 'editor', 'viewer'] &&
+             (data.workspaceId == null || isValidId(data.workspaceId));
+    }
+
+    function isValidWorkspace(data) {
+      return data.keys().hasAll(['id', 'name', 'churchName', 'passcode', 'createdById', 'createdByName', 'createdAt']) &&
+             data.keys().hasOnly(['id', 'name', 'churchName', 'passcode', 'createdById', 'createdByName', 'createdAt', 'churchBannerUrl', 'churchLogoText', 'churchLogoUrl']) &&
+             isValidId(data.id) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.churchName is string && data.churchName.size() <= 100;
+    }
+
+    // --- Rules ---
+
+    // USERS
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isOwner(userId) || 
+        isGlobalAdmin() || 
+        (hasWorkspaceRole(incoming().workspaceId, ['head-leader']) && incoming().role != 'admin')
+      ) && isValidUserProfile(incoming(), userId);
+      
+      allow update: if isSignedIn() && (
+        (isOwner(userId) && isValidUserProfile(incoming(), userId) && (isGlobalAdmin() || incoming().role == existing().role)) ||
+        isGlobalAdmin() ||
+        (hasWorkspaceRole(existing().workspaceId, ['head-leader']) && (incoming().workspaceId == existing().workspaceId || incoming().workspaceId == null) && incoming().role != 'admin')
+      );
+      
+      allow delete: if isSignedIn() && (isGlobalAdmin() || (existing().workspaceId != null && hasWorkspaceRole(existing().workspaceId, ['head-leader'])));
+      
+      match /{allUserPaths=**} {
+        allow read, write: if isOwner(userId) || isGlobalAdmin();
+      }
+    }
+
+    // WORKSPACES
+    match /workspaces/{workspaceId} {
+      // Allow any signed in user to read/list workspaces (needed to find by passcode)
+      allow read, list: if isSignedIn();
+      
+      allow create: if isSignedIn() && isValidId(workspaceId) && incoming().id == workspaceId && isValidWorkspace(incoming());
+      
+      allow update: if isSignedIn() && (
+        isGlobalAdmin() || 
+        (hasWorkspaceRole(workspaceId, ['head-leader']) && isValidWorkspace(incoming()))
+      );
+      
+      allow delete: if isGlobalAdmin();
+
+      // RECURSIVE MATCH FOR ALL SUB-COLLECTIONS
+      // This simplifies the rules and ensures that workspace members have access
+      match /{allPaths=**} {
+        allow read, list: if isSignedIn(); // Simplified for troubleshooting, still requires authentication
+        
+        allow create, update: if isSignedIn() && (
+          isGlobalAdmin() || 
+          hasWorkspaceRole(workspaceId, ['head-leader', 'leader', 'editor'])
+        );
+        
+        allow delete: if isSignedIn() && (
+          isGlobalAdmin() || 
+          hasWorkspaceRole(workspaceId, ['head-leader', 'leader'])
+        );
+      }
+    }
+  }
+}
+

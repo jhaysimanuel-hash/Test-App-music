@@ -1,0 +1,6 @@
+{
+  "name": "WorshipFlow - Worship Team & Live Sync Platform",
+  "description": "Production-ready Android hybrid & web app for church worship teams. Features real-time live sync for band & projector, chord transposer, dual musician/vocalist views, setlist builder, offline mode, and RBAC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
