@@ -39,7 +39,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme }) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getWorkspaces().then(setWorkspaces);
+    getWorkspaces().then(setWorkspaces).catch((err: unknown) => {
+      console.warn('Unable to load workspaces:', err);
+    });
   }, []);
 
   const handleGoogleLoginAction = async () => {
@@ -65,7 +67,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme }) => {
         }
       }
     } catch (err: any) {
-      setError(err.message || "Failed to sign in with Google");
+      const code = typeof err?.code === 'string' ? err.code : '';
+      const message = code === 'auth/popup-blocked'
+        ? 'Your browser blocked the Google sign-in window. Allow pop-ups and try again.'
+        : code === 'auth/unauthorized-domain'
+          ? 'This app address is not enabled for Google sign-in in Firebase.'
+          : err?.message || 'Failed to sign in with Google';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -83,25 +91,28 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme }) => {
       return;
     }
 
-    const foundWs = await findWorkspaceByPasscode(passcodeInput.trim());
+    try {
+      const foundWs = await findWorkspaceByPasscode(passcodeInput.trim());
 
-    if (!foundWs) {
-      setError('Invalid Passcode ID. Please check with your Head Leader.');
+      if (!foundWs) {
+        setError('Invalid Passcode ID. Please check with your Head Leader.');
+        return;
+      }
+
+      await addPendingMember({
+        id: uid,
+        name: name.trim(),
+        email: email.trim(),
+        workspaceId: foundWs.id
+      });
+
+      setTargetPendingWs(foundWs);
+      setAuthStage('pending');
+    } catch (err: any) {
+      setError(err?.message || 'Could not connect to the church workspace. Please try again.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Submit pending request
-    await addPendingMember({
-      id: uid,
-      name: name.trim(),
-      email: email.trim(),
-      workspaceId: foundWs.id
-    });
-
-    setTargetPendingWs(foundWs);
-    setAuthStage('pending');
-    setLoading(false);
   };
 
   // Handle Creating Workspace (Auto Head Leader Entry)
@@ -124,9 +135,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme }) => {
       instrument: 'Worship Head Leader'
     };
 
-    const newWs = await createWorkspace(newChurchName.trim(), tempHeadLeader);
-    onLogin({ ...tempHeadLeader, workspaceId: newWs.id }, newWs.id);
-    setLoading(false);
+    try {
+      const newWs = await createWorkspace(newChurchName.trim(), tempHeadLeader);
+      onLogin({ ...tempHeadLeader, workspaceId: newWs.id }, newWs.id);
+    } catch (err: any) {
+      setError(err?.message || 'Could not create the church workspace. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (authStage === 'pending' && targetPendingWs) {

@@ -107,15 +107,18 @@ export default function App() {
   useEffect(() => {
     let unsubscribeWs: (() => void) | null = null;
     let unsubscribeUserProf: (() => void) | null = null;
+    let authStateReceived = false;
 
-    // Safety fallback: ensure loading screen NEVER hangs permanently (max 3 seconds timeout)
+    // Auth can resolve before Firestore profile loading finishes. Keep the app usable if the cloud request stalls.
     const loadingSafetyTimeout = setTimeout(() => {
+      if (authStateReceived && auth.currentUser) {
+        setConnectionError('Firebase connected to your account, but the Firestore profile request did not finish. Check your connection and try again.');
+      }
       setAuthLoading(false);
-    }, 3000);
+    }, 8000);
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user: any) => {
-      // Clear safety timeout immediately on first fire
-      clearTimeout(loadingSafetyTimeout);
+      authStateReceived = true;
       
       try {
         if (user) {
@@ -167,7 +170,9 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("Auth state processing error:", err);
+        setConnectionError('Firebase could not finish loading your account. Check your connection and try again.');
       } finally {
+        clearTimeout(loadingSafetyTimeout);
         setAuthLoading(false);
       }
     });
