@@ -214,6 +214,18 @@ export async function createWorkspace(churchName: string, creator: UserProfile, 
   }
 }
 
+export async function deleteWorkspace(wsId: string): Promise<void> {
+  try {
+    // Clear the active workspace if it's the one being deleted.
+    if (getActiveWorkspaceId() === wsId) setActiveWorkspaceId('');
+    const { error } = await supabase.from('workspaces').delete().eq('id', wsId);
+    if (error) throw error;
+  } catch (error) {
+    console.warn('deleteWorkspace error:', error);
+    throw error;
+  }
+}
+
 export async function updateWorkspacePasscode(workspaceId: string, newPasscode: string): Promise<void> {
   const cleanPasscode = newPasscode.trim().toUpperCase();
   try {
@@ -343,7 +355,20 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
     if (!uid) return null;
     const { data, error } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
     if (error) throw error;
-    return data ? mapProfile(data) : null;
+    if (data) return mapProfile(data);
+
+    // Self-heal: auth user exists but no profile row yet. Create one from auth metadata
+    // so the user is never stuck on the login screen.
+    const authUser = session.session?.user;
+    const nameFromMeta = (authUser?.user_metadata as any)?.name || (authUser?.email ? authUser.email.split('@')[0] : 'Member');
+    const { data: inserted, error: insErr } = await supabase.from('profiles').upsert({
+      id: uid,
+      name: nameFromMeta,
+      email: authUser?.email || '',
+      role: 'viewer',
+    }).select('*').maybeSingle();
+    if (insErr) throw insErr;
+    return inserted ? mapProfile(inserted) : null;
   } catch (error: any) {
     console.warn('getCurrentUserProfile deferred:', error?.message || error);
     return null;

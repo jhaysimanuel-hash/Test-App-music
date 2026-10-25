@@ -44,6 +44,7 @@ import {
   approvePendingMember,
   denyPendingMember,
   updateWorkspacePasscode,
+  deleteWorkspace,
   subscribeToTeamMembers,
   subscribeToPendingMembers
 } from '../utils/storage';
@@ -540,19 +541,45 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </label>
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {workspaces.map((ws) => (
-                    <button
+                    <div
                       key={ws.id}
-                      onClick={() => {
-                        onSwitchWorkspace(ws.id);
-                        setIsWorkspaceModalOpen(false);
-                      }}
-                      className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                      className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 ${
                         ws.id === activeWorkspace.id ? 'bg-yellow-400 text-slate-950 border-yellow-500 font-extrabold' : 'bg-slate-800 border-slate-700 text-slate-300'
                       }`}
                     >
-                      <span>{ws.churchName}</span>
-                      <span className="font-mono text-[10px] opacity-80">({ws.passcode})</span>
-                    </button>
+                      <button
+                        onClick={() => {
+                          onSwitchWorkspace(ws.id);
+                          setIsWorkspaceModalOpen(false);
+                        }}
+                        className="flex items-center justify-between flex-1 min-w-0"
+                      >
+                        <span className="truncate">{ws.churchName}</span>
+                        <span className="font-mono text-[10px] opacity-80 shrink-0">({ws.passcode})</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Delete the "${ws.churchName}" server? This removes all its songs, setlists, and members. This cannot be undone.`)) return;
+                          try {
+                            await deleteWorkspace(ws.id);
+                            if (ws.id === activeWorkspace.id) {
+                              const remaining = workspaces.filter(w => w.id !== ws.id);
+                              if (remaining.length > 0) {
+                                onSwitchWorkspace(remaining[0].id);
+                              } else {
+                                onLogout();
+                              }
+                            }
+                          } catch (err) {
+                            alert('Could not delete the server. You may not have permission.');
+                          }
+                        }}
+                        className="p-1.5 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white transition-colors shrink-0"
+                        title="Delete this server"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
