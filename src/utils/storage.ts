@@ -229,12 +229,8 @@ export async function deleteWorkspace(wsId: string): Promise<void> {
 
 export async function updateWorkspacePasscode(workspaceId: string, newPasscode: string): Promise<void> {
   const cleanPasscode = newPasscode.trim().toUpperCase();
-  try {
-    const { error } = await supabase.from('workspaces').update({ passcode: cleanPasscode }).eq('id', workspaceId);
-    if (error) throw error;
-  } catch (error) {
-    console.warn('updateWorkspacePasscode error:', error);
-  }
+  const { error } = await supabase.from('workspaces').update({ passcode: cleanPasscode }).eq('id', workspaceId);
+  if (error) throw error;
 }
 
 export async function updateWorkspaceBannerAndName(wsId: string, churchName: string, bannerUrl?: string, logoText?: string, logoUrl?: string): Promise<void> {

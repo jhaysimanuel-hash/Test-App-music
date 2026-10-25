@@ -30,6 +30,7 @@ import {
   getUserPreferences,
   saveUserPreferences,
   updateWorkspaceBannerAndName,
+  updateWorkspacePasscode,
   updateUserProfile,
   getCurrentUserProfile,
   getCachedUserProfile,
@@ -294,6 +295,8 @@ export default function App() {
     setCurrentUserState(user);
     setCurrentUser(user);
     setIsAuthenticated(true);
+    const wsList = await getWorkspaces();
+    setWorkspaces(wsList);
     showToast(`Entered ${activeWorkspace.churchName} as ${user.role.toUpperCase()}`);
   };
 
@@ -361,6 +364,13 @@ export default function App() {
     const wsList = await getWorkspaces();
     setWorkspaces(wsList);
     showToast('Updated Church Workspace Banner & Name!');
+  };
+
+  const handleUpdatePasscode = async (wsId: string, newPasscode: string) => {
+    await updateWorkspacePasscode(wsId, newPasscode);
+    const wsList = await getWorkspaces();
+    setWorkspaces(wsList);
+    showToast('Workspace Passcode updated successfully!');
   };
 
   const handleUpdateUserName = async (newName: string) => {
@@ -621,6 +631,7 @@ export default function App() {
         userPreferences={userPreferences}
         onUpdatePreferences={handleUpdatePreferences}
         onUpdateWorkspaceBannerAndName={handleUpdateWorkspaceBannerAndNameHandler}
+        onUpdatePasscode={handleUpdatePasscode}
         onUpdateUserName={handleUpdateUserName}
         isChatOpen={isChatOpen}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}

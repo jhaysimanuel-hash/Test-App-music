@@ -43,7 +43,6 @@ import {
   getPendingMembers,
   approvePendingMember,
   denyPendingMember,
-  updateWorkspacePasscode,
   deleteWorkspace,
   subscribeToTeamMembers,
   subscribeToPendingMembers
@@ -75,6 +74,7 @@ interface NavbarProps {
   userPreferences: UserPreferences;
   onUpdatePreferences: (prefs: Partial<UserPreferences>) => void;
   onUpdateWorkspaceBannerAndName: (wsId: string, churchName: string, bannerUrl?: string, logoText?: string, logoUrl?: string) => void;
+  onUpdatePasscode: (wsId: string, newPasscode: string) => Promise<void>;
   onUpdateUserName: (newName: string) => void;
   isChatOpen: boolean;
   onToggleChat: () => void;
@@ -104,6 +104,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   userPreferences,
   onUpdatePreferences,
   onUpdateWorkspaceBannerAndName,
+  onUpdatePasscode,
   onUpdateUserName,
   isChatOpen,
   onToggleChat
@@ -194,13 +195,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     setIsSettingsModalOpen(false);
   };
 
-  const handleSavePasscode = (e: React.FormEvent) => {
+  const handleSavePasscode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editablePasscode.trim()) return;
-    updateWorkspacePasscode(activeWorkspace.id, editablePasscode.trim());
-    activeWorkspace.passcode = editablePasscode.trim().toUpperCase();
-    setIsEditingPasscode(false);
-    alert('Workspace Passcode updated successfully!');
+    try {
+      await onUpdatePasscode(activeWorkspace.id, editablePasscode.trim());
+      setIsEditingPasscode(false);
+    } catch (err: any) {
+      alert('Could not save the passcode: ' + (err?.message || 'Please try again.'));
+    }
   };
 
   const handleCopyPasscode = () => {
