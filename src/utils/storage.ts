@@ -162,7 +162,7 @@ export async function createWorkspace(churchName: string, creator: UserProfile, 
 
     // Ensure creator profile points to the new workspace as head-leader.
     const role: UserRole = creator.role === 'admin' ? 'admin' : 'head-leader';
-    await supabase.from('profiles').upsert({
+    const { error: profErr } = await supabase.from('profiles').upsert({
       id: authUid || creator.id,
       name: creator.name,
       email: creator.email,
@@ -170,6 +170,7 @@ export async function createWorkspace(churchName: string, creator: UserProfile, 
       workspace_id: id,
       instrument: creator.instrument || 'Worship Head Leader',
     });
+    if (profErr) throw new Error(`Could not link your profile to the new server: ${profErr.message}`);
 
     // Seed default songs.
     for (const song of SEED_SONGS) {

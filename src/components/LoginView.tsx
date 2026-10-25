@@ -8,7 +8,8 @@ import {
   addPendingMember,
   findWorkspaceByPasscode,
   setActiveWorkspaceId,
-  getCurrentUserProfile
+  getCurrentUserProfile,
+  subscribeToUserProfile
 } from '../utils/storage';
 
 interface LoginViewProps {
@@ -174,6 +175,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme }) => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (authStage !== 'pending' || !uid) return;
+    const unsub = subscribeToUserProfile(uid, (profile) => {
+      if (profile && profile.workspaceId) {
+        setActiveWorkspaceId(profile.workspaceId);
+        onLogin(profile, profile.workspaceId);
+      }
+    });
+    return unsub;
+  }, [authStage, uid, onLogin]);
 
   if (authStage === 'pending' && targetPendingWs) {
     return (
